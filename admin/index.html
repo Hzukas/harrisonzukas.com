@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Site Editor</title>
+  <style>
+    :root { --bg: #141414; --panel: #1e1e1e; --fg: #eee; --muted: #999; --line: #333; --accent: #3b82f6; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .wrap { display: grid; grid-template-columns: 380px 1fr; min-height: 100vh; }
+    .panel { background: var(--panel); padding: 1.5rem; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 1.1rem; }
+    h1 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.35rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    input[type=text], textarea { width: 100%; background: #111; color: var(--fg); border: 1px solid var(--line); border-radius: 6px; padding: 0.6rem; font: inherit; }
+    textarea { min-height: 7rem; resize: vertical; }
+    input[type=range] { width: 100%; }
+    .thumb { width: 96px; height: 96px; object-fit: cover; border-radius: 6px; background: #000; display: block; margin-bottom: 0.5rem; }
+    button { font: inherit; border: 0; border-radius: 6px; padding: 0.7rem 1rem; cursor: pointer; }
+    .primary { background: var(--accent); color: #fff; font-weight: 600; }
+    .primary:disabled { opacity: 0.5; cursor: wait; }
+    .status { font-size: 0.9rem; color: var(--muted); min-height: 1.3em; white-space: pre-wrap; }
+    .status.ok { color: #4ade80; } .status.err { color: #f87171; }
+    .preview { display: flex; flex-direction: column; }
+    .preview header { padding: 0.6rem 1rem; font-size: 0.8rem; color: var(--muted); border-bottom: 1px solid var(--line); }
+    iframe { flex: 1; border: 0; width: 100%; background: #000; }
+    @media (max-width: 800px) { .wrap { grid-template-columns: 1fr; } iframe { height: 60vh; } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <form class="panel" id="form">
+    <h1>harrisonzukas.com editor</h1>
+
+    <div>
+      <label>Photo</label>
+      <img class="thumb" id="thumb" alt="">
+      <input type="file" id="image" accept=".jpg,.jpeg,.png,.webp,.gif">
+    </div>
+
+    <div>
+      <label>Photo size: <span id="sizeVal"></span>% of screen</label>
+      <input type="range" id="size" min="5" max="100" step="1">
+    </div>
+
+    <div>
+      <label>Headline (optional)</label>
+      <input type="text" id="headline" placeholder="Leave blank for none">
+    </div>
+
+    <div>
+      <label>Text (optional)</label>
+      <textarea id="text" placeholder="Leave blank for none"></textarea>
+    </div>
+
+    <button class="primary" id="update" type="submit">Update website</button>
+    <div class="status" id="status"></div>
+  </form>
+
+  <div class="preview">
+    <header>Live preview</header>
+    <iframe id="frame" title="Preview"></iframe>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let image = null;
+
+async function load() {
+  const c = await (await fetch('/api/content')).json();
+  $('size').value = c.size; $('sizeVal').textContent = c.size;
+  $('headline').value = c.headline || ''; $('text').value = c.text || '';
+  $('thumb').src = '/' + c.photo + '?t=' + Date.now();
+  preview();
+}
+
+function payload() {
+  return { headline: $('headline').value, text: $('text').value, size: +$('size').value, image };
+}
+
+let timer;
+function preview() {
+  clearTimeout(timer);
+  timer = setTimeout(async () => {
+    const r = await fetch('/api/preview', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
+    $('frame').srcdoc = await r.text();
+  }, 150);
+}
+
+$('image').addEventListener('change', () => {
+  const f = $('image').files[0];
+  if (!f) { image = null; return; }
+  const rd = new FileReader();
+  rd.onload = () => { image = { name: f.name, data: rd.result }; $('thumb').src = rd.result; preview(); };
+  rd.readAsDataURL(f);
+});
+$('size').addEventListener('input', () => { $('sizeVal').textContent = $('size').value; preview(); });
+$('headline').addEventListener('input', preview);
+$('text').addEventListener('input', preview);
+
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('update'), st = $('status');
+  btn.disabled = true; st.className = 'status'; st.textContent = 'Publishing…';
+  try {
+    const r = await fetch('/api/update', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload()) });
+    const j = await r.json();
+    st.className = 'status ' + (j.ok ? 'ok' : 'err'); st.textContent = j.message;
+    if (j.ok) { image = null; $('image').value = ''; load(); }
+  } catch (err) {
+    st.className = 'status err'; st.textContent = String(err);
+  } finally { btn.disabled = false; }
+});
+
+load();
+</script>
+</body>
+</html>
